@@ -44,7 +44,7 @@ def read_text(filename):
 
 
 def save_text(filename, text):
-    with open(filename, "w", encoding="utf-8") as file:
+    with open(filename, "w", encoding="utf-8", newline="\n") as file:
         return file.write(text)
 
 
