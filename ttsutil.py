@@ -74,7 +74,7 @@ def extract(filename):
     items.update({'GLOBAL': data})
     
     for item in items.values():
-        name = item.get('Nickname', "unnamed").translate(remove_map)
+        name = item.get('Nickname', "").translate(remove_map) or "unnamed"
         for key, (comp, ext) in components.items():
             if value := item.get(key):
                 save_text(SCRIPTS + f"{name}.{comp}.{item['GUID']}.{ext}", value)
