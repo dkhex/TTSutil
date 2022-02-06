@@ -61,7 +61,7 @@ def extract(filename):
     remove_map = {ord(s): None for s in "\"\'\\|/!?*<>."}
     components = {
         'LuaScript': ("script", "lua"),
-        'LuaScriptState': ("state", "lua"),
+        'LuaScriptState': ("state", "json"),
         'XmlUI': ("ui", "xml"),
     }
     
