@@ -1,31 +1,16 @@
 import json
 import os
 import argparse
+import shutil
+from pathlib import Path
 
 
-class ShortPath:
-    def __init__(self, path):
-        self.path = path
-        
-    def __add__(self, filename):    
-        return os.path.join(self.path, filename)
-        
-    def __iter__(self):
-        return iter(os.listdir(self.path))
-        
-    def __bool__(self):
-        return os.path.exists(self.path)
-        
-    def init(self):
-        if not self:
-            os.mkdir(self.path)
-            
-    def clear(self):
-        for file in self:
-            os.remove(self + file)
-
-
-SCRIPTS = ShortPath("scripts")
+EXTRACTED = {
+    'original': "original.json",
+    'dirs': [
+        "scripts",
+    ],
+}
 
 
 def read_json(filename):
@@ -33,9 +18,12 @@ def read_json(filename):
         return json.load(file)
 
 
-def save_json(filename, data):
+def save_json(filename, data, pretty=False):
     with open(filename, "w", encoding="utf-8") as file:
-        return json.dump(data, file)
+        if pretty:
+            return json.dump(data, file, indent=2)
+        else:
+            return json.dump(data, file)
 
 
 def read_text(filename):
@@ -48,6 +36,16 @@ def save_text(filename, text):
         return file.write(text)
 
 
+def clear_dir(path):
+    orig_path = path.joinpath(EXTRACTED['original'])
+    if orig_path.exists():
+        orig_path.unlink()
+    for name in EXTRACTED['dirs']:
+        dir_path = path.joinpath(name)
+        if dir_path.exists() and dir_path.is_dir():
+            shutil.rmtree(dir_path)
+
+
 def flatten_items(items):
     result = {}
     for item in items:
@@ -57,19 +55,22 @@ def flatten_items(items):
     return result
 
 
-def extract(filename):
+def extract(file_path, target):
     remove_map = {ord(s): None for s in "\"\'\\|/!?*<>."}
     components = {
         'LuaScript': ("script", "lua"),
         'LuaScriptState': ("state", "json"),
         'XmlUI': ("ui", "xml"),
     }
-    
-    data = read_json(filename)
+
+    clear_dir(target)
+    shutil.copy(file_path, target.joinpath("original.json"))
+    scripts = target.joinpath("scripts")
+    scripts.mkdir()
+
+    data = read_json(file_path)
     data["Nickname"] = "global"
     data["GUID"] = "GLOBAL"
-    SCRIPTS.init()
-    SCRIPTS.clear()
     items = flatten_items(data['ObjectStates'])
     items.update({'GLOBAL': data})
     
@@ -77,28 +78,40 @@ def extract(filename):
         name = item.get('Nickname', "").translate(remove_map) or "unnamed"
         for key, (comp, ext) in components.items():
             if value := item.get(key):
-                save_text(SCRIPTS + f"{name}.{comp}.{item['GUID']}.{ext}", value)
+                filename = f"{name}.{comp}.{item['GUID']}.{ext}"
+                save_text(target.joinpath("scripts", filename), value)
 
 
-def build(filename, source):
-    if not SCRIPTS:
-        raise FileNotFoundError(f"Directory '{SCRIPTS.path}' not found. Exiting.")
+def build(file_path, target, pretty=False):
     components = {
         'script': 'LuaScript',
         'state': 'LuaScriptState',
         'ui': 'XmlUI',
     }
-    data = read_json(source)
+
+    data = read_json(target.joinpath("original.json"))
     items = flatten_items(data['ObjectStates'])
     items.update({'GLOBAL': data})
-    for file in SCRIPTS:
-        name_parts = file.split(".")
-        if len(name_parts) != 4: continue
+
+    for file in target.joinpath("scripts").iterdir():
+        name_parts = str(file).rsplit(".", maxsplit=3)
+        if len(name_parts) < 4:
+            continue
         # name, comp, guid, extension
         _, component, guid, _ = name_parts
         if comp := components.get(component):
-            items[guid][comp] = read_text(SCRIPTS + file)
-    save_json(filename, data)
+            items[guid][comp] = read_text(file)
+    save_json(file_path, data, pretty)
+
+
+def get_paths(args):
+    file_arg = args.extract or args.build
+    file_path = Path(file_arg)
+    if args.target:
+        target = Path(args.target)
+    else:
+        target = file_path.parent.joinpath(file_path.stem)
+    return file_path, target
 
 
 if __name__ == "__main__":
@@ -109,24 +122,46 @@ if __name__ == "__main__":
         """
     )
     parser.add_argument(
-        "filename",
-        help="Name of file which will be extracted or used as base for new build")
+        "-e", "--extract",
+        type=str,
+        nargs="?",
+        const=False,
+        help="Extract data from specified savefile")
+    parser.add_argument(
+        "-t", "--target",
+        type=str,
+        nargs="?",
+        const=False,
+        help="Specify directory for extracted data")
     parser.add_argument(
         "-b", "--build",
         type=str,
         nargs="?",
         const=False,
-        help="Build a new save from extracted resources")
+        help="Build a new savefile from extracted resources")
+    parser.add_argument(
+        "-r", "--readable",
+        action="store_true",
+        help="Make building savefile human-readable (prettify), works only when --build")
     args = parser.parse_args()
-    
-    if args.build is not None:
-        build_file = args.build or args.filename
-        try:
-            build(build_file, args.filename)
-        except FileNotFoundError as e:
-            print(e)
-        else:
-            print("New savefile created")
-    else:
-        extract(args.filename)
+
+    if args.extract and args.build:
+        print("--extract and --build can't work at the same time. What you have made have no sense, y'know?")
+        exit(1)
+    elif args.extract:
+        file_path, target = get_paths(args)
+        target.mkdir(parents=True, exist_ok=True)
+        clear_dir(target)
+        extract(file_path, target)
         print("Extraction complete")
+    elif args.build:
+        file_path, target = get_paths(args)
+        if (not target.joinpath("original.json").exists or
+            not target.joinpath("scripts").exists):
+            print("Specified target is not valid extracted data")
+            exit(1)
+        build(file_path, target, args.readable)
+        print("Building complete")
+    else:
+        print("Use --extract FILE or --build DIR, check --help")
+        exit(1)
