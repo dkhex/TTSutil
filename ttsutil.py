@@ -5,6 +5,14 @@ import shutil
 from pathlib import Path
 
 
+EXTRACTED = {
+    'original': "original.json",
+    'dirs': [
+        "scripts",
+    ],
+}
+
+
 def read_json(filename):
     with open(filename, encoding="utf-8") as file:
         return json.load(file)
@@ -13,7 +21,7 @@ def read_json(filename):
 def save_json(filename, data, pretty=False):
     with open(filename, "w", encoding="utf-8") as file:
         if pretty:
-            return json.dump(data, file, indent=2, sort_keys=True)
+            return json.dump(data, file, indent=2)
         else:
             return json.dump(data, file)
 
@@ -29,13 +37,13 @@ def save_text(filename, text):
 
 
 def clear_dir(path):
-    if not path.joinpath("original.json").exist:
-        return
-    for item in path.iterdir():
-        if item.is_file:
-            shutil.unlink(item)
-        elif item.is_dir:
-            shutil.rmtree(item)
+    orig_path = path.joinpath(EXTRACTED['original'])
+    if orig_path.exists():
+        orig_path.unlink()
+    for name in EXTRACTED['dirs']:
+        dir_path = path.joinpath(name)
+        if dir_path.exists() and dir_path.is_dir():
+            shutil.rmtree(dir_path)
 
 
 def flatten_items(items):
@@ -55,7 +63,10 @@ def extract(file_path, target):
         'XmlUI': ("ui", "xml"),
     }
 
+    clear_dir(target)
     shutil.copy(file_path, target.joinpath("original.json"))
+    scripts = target.joinpath("scripts")
+    scripts.mkdir()
 
     data = read_json(file_path)
     data["Nickname"] = "global"
@@ -83,7 +94,7 @@ def build(file_path, target, pretty=False):
     items.update({'GLOBAL': data})
 
     for file in target.joinpath("scripts").iterdir():
-        name_parts = file.rsplit(".", maxsplit=3)
+        name_parts = str(file).rsplit(".", maxsplit=3)
         if len(name_parts) < 4:
             continue
         # name, comp, guid, extension
@@ -99,7 +110,7 @@ def get_paths(args):
     if args.target:
         target = Path(args.target)
     else:
-        target = file_path.parent.joinpath(file_arg.stem)
+        target = file_path.parent.joinpath(file_path.stem)
     return file_path, target
 
 
