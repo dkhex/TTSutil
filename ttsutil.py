@@ -4,26 +4,28 @@ import argparse
 import shutil
 from pathlib import Path
 
-
+DEFAULT_NAME = "unnamed"
 EXTRACTED = {
-    'original': "original.json",
+    'base': "base.json",
     'dirs': [
         "scripts",
     ],
 }
 
 
+# File-related utilities
 def read_json(filename):
     with open(filename, encoding="utf-8") as file:
         return json.load(file)
 
 
 def save_json(filename, data, pretty=False):
+    if pretty:
+        indent = 2
+    else:
+        indent = None
     with open(filename, "w", encoding="utf-8") as file:
-        if pretty:
-            return json.dump(data, file, indent=2)
-        else:
-            return json.dump(data, file)
+        return json.dump(data, file, ensure_ascii=False, indent=indent)
 
 
 def read_text(filename):
@@ -37,7 +39,7 @@ def save_text(filename, text):
 
 
 def clear_dir(path):
-    orig_path = path.joinpath(EXTRACTED['original'])
+    orig_path = path.joinpath(EXTRACTED['base'])
     if orig_path.exists():
         orig_path.unlink()
     for name in EXTRACTED['dirs']:
@@ -46,16 +48,93 @@ def clear_dir(path):
             shutil.rmtree(dir_path)
 
 
-def flatten_items(items):
-    result = {}
-    for item in items:
-        result.update({item['GUID']: item})
+# Some tools for work with tree-like structure of TTS objects
+class IDGenerator:
+    """Infinite iterates all 3-byte long hex values.
+    Instance can be used as an iterator and/or as a function
+    """
+
+    def __init__(self, start_value=0):
+        self.count = start_value
+
+    def __call__(self):
+        self.count += 1
+        self.count &= 0xFFFFFF  # or 2**24-1
+        return f"{self.count:06x}"
+
+    def __iter__(self):
+        return self
+
+    __next__ = __call__
+
+
+get_id = IDGenerator()
+
+
+class MutableChain:
+    """Special kind of chain iterator which allows adding new iterables while iterating"""
+
+    def __init__(self, *iterables):
+        self.queue = list(iterables)
+        self.current = None
+        self.next_iter()
+
+    def next_iter(self):
+        if self.queue:
+            self.current = iter(self.queue.pop(0))
+        else:
+            raise StopIteration
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        while True:
+            try:
+                val = next(self.current)
+            except StopIteration:
+                self.next_iter()
+            else:
+                return val
+
+    def __add__(self, iterable):
+        self.queue.append(iterable)
+        return self
+
+
+# Useful iterators for tree-like structure of TTS objects
+def iterate_items(items):
+    """Iterate over all objects sorted by nesting level, roots first children last"""
+    chain = MutableChain(items)
+    for item in chain:
+        yield item
         if 'ContainedObjects' in item:
-            result.update(flatten_items(item['ContainedObjects']))
+            chain += item['ContainedObjects']
+
+
+def fix_duplicate_iterator(items):
+    """Iterate over given objects and assign new GUID for dupes"""
+    used_guids = set()
+    for item in items:
+        if item['GUID'] in used_guids:
+            while (new_guid := get_id()) in used_guids:
+                continue
+            item['GUID'] = new_guid
+        used_guids.add(item['GUID'])
+        yield item
+
+
+def flatten_items(items, fix_dupes=False):
+    """Returns dict with all objects, which can be accessed by GUID"""
+    items_it = iterate_items(items)
+    if fix_dupes:
+        items_it = fix_duplicate_iterator(items_it)
+    result = {item['GUID']: item for item in items_it}
     return result
 
 
-def extract(file_path, target):
+# Main parser function
+def extract(file_path, target, pretty=False):
     remove_map = {ord(s): None for s in "\"\'\\|/!?*<>."}
     components = {
         'LuaScript': ("script", "lua"),
@@ -64,24 +143,27 @@ def extract(file_path, target):
     }
 
     clear_dir(target)
-    shutil.copy(file_path, target.joinpath("original.json"))
     scripts = target.joinpath("scripts")
     scripts.mkdir()
 
     data = read_json(file_path)
     data["Nickname"] = "global"
     data["GUID"] = "GLOBAL"
-    items = flatten_items(data['ObjectStates'])
+    items = flatten_items(data['ObjectStates'], fix_dupes=True)
     items.update({'GLOBAL': data})
-    
+
     for item in items.values():
-        name = item.get('Nickname', "").translate(remove_map) or "unnamed"
+        name = item.get('Nickname', "").translate(remove_map) or DEFAULT_NAME
         for key, (comp, ext) in components.items():
             if value := item.get(key):
-                filename = f"{name}.{comp}.{item['GUID']}.{ext}"
+                filename = f"{name}.{item['GUID']}.{comp}.{ext}"
                 save_text(target.joinpath("scripts", filename), value)
+                item[key] = ""
+
+    save_json(target.joinpath(EXTRACTED['base']), data, pretty)
 
 
+# Main generate function
 def build(file_path, target, pretty=False):
     components = {
         'script': 'LuaScript',
@@ -89,18 +171,27 @@ def build(file_path, target, pretty=False):
         'ui': 'XmlUI',
     }
 
-    data = read_json(target.joinpath("original.json"))
+    data = read_json(target.joinpath(EXTRACTED['base']))
     items = flatten_items(data['ObjectStates'])
     items.update({'GLOBAL': data})
 
     for file in target.joinpath("scripts").iterdir():
-        name_parts = str(file).rsplit(".", maxsplit=3)
+        name_parts = file.name.rsplit(".", maxsplit=3)
         if len(name_parts) < 4:
             continue
-        # name, comp, guid, extension
-        _, component, guid, _ = name_parts
+        # name, guid, component, extension
+        name, guid, component, _ = name_parts
+        item = items.get(guid)
+        if item is None:
+            print(f"Can't find object with guid '{guid}', file '{file}' not used")
+            continue
+        if not item['Nickname'] and name != DEFAULT_NAME:
+            item['Nickname'] = name
         if comp := components.get(component):
             items[guid][comp] = read_text(file)
+
+    del data['Nickname']
+    del data['GUID']
     save_json(file_path, data, pretty)
 
 
@@ -142,22 +233,21 @@ if __name__ == "__main__":
     parser.add_argument(
         "-r", "--readable",
         action="store_true",
-        help="Make building savefile human-readable (prettify), works only when --build")
+        help="Make building savefile human-readable (prettify), for --extracted formats 'base.json'")
     args = parser.parse_args()
 
     if args.extract and args.build:
-        print("--extract and --build can't work at the same time. What you have made have no sense, y'know?")
+        print("--extract and --build can't work at the same time. Such action have no sense, y'know?")
         exit(1)
     elif args.extract:
         file_path, target = get_paths(args)
         target.mkdir(parents=True, exist_ok=True)
         clear_dir(target)
-        extract(file_path, target)
+        extract(file_path, target, args.readable)
         print("Extraction complete")
     elif args.build:
         file_path, target = get_paths(args)
-        if (not target.joinpath("original.json").exists or
-            not target.joinpath("scripts").exists):
+        if not target.joinpath(EXTRACTED['base']).exists:
             print("Specified target is not valid extracted data")
             exit(1)
         build(file_path, target, args.readable)
