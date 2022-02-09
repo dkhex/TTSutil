@@ -53,7 +53,7 @@ def save_json(filename, data, pretty=False):
     else:
         indent = None
         separators = (",", ":")
-    with open(filename, "w", encoding="utf-8") as file:
+    with open(filename, "w", encoding="utf-8", newline="\n") as file:
         return json.dump(
             data,
             file,
