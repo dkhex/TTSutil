@@ -11,6 +11,19 @@ EXTRACTED = {
         "scripts",
     ],
 }
+EXTRACT_STRUCTURE = {
+    # key : directory, subname, extension
+    'LuaScript': ("scripts", "script", "lua"),
+    'LuaScriptState': ("scripts", "state", "json"),
+    'XmlUI': ("scripts", "ui", "xml"),
+}
+BUILD_STRUCTURE = {
+    'scripts': {
+        'script': 'LuaScript',
+        'state': 'LuaScriptState',
+        'ui': 'XmlUI',
+    },
+}
 
 
 # File-related utilities
@@ -48,7 +61,7 @@ def clear_dir(path):
             shutil.rmtree(dir_path)
 
 
-# Some tools for work with tree-like structure of TTS objects
+# Some tools for work with tree-like structure and GUIDs of TTS objects
 class IDGenerator:
     """Infinite iterates all 3-byte long hex values.
     Instance can be used as an iterator and/or as a function
@@ -135,12 +148,8 @@ def flatten_items(items, fix_dupes=False):
 
 # Main parser function
 def extract(file_path, target, pretty=False):
+    # for str.translate, removes invalid symbols from file name
     remove_map = {ord(s): None for s in "\"\'\\|/!?*<>."}
-    components = {
-        'LuaScript': ("script", "lua"),
-        'LuaScriptState': ("state", "json"),
-        'XmlUI': ("ui", "xml"),
-    }
 
     clear_dir(target)
     scripts = target.joinpath("scripts")
@@ -154,10 +163,10 @@ def extract(file_path, target, pretty=False):
 
     for item in items.values():
         name = item.get('Nickname', "").translate(remove_map) or DEFAULT_NAME
-        for key, (comp, ext) in components.items():
+        for key, (directory, comp, ext) in EXTRACT_STRUCTURE.items():
             if value := item.get(key):
                 filename = f"{name}.{item['GUID']}.{comp}.{ext}"
-                save_text(target.joinpath("scripts", filename), value)
+                save_text(target.joinpath(directory, filename), value)
                 item[key] = ""
 
     save_json(target.joinpath(EXTRACTED['base']), data, pretty)
@@ -165,30 +174,25 @@ def extract(file_path, target, pretty=False):
 
 # Main generate function
 def build(file_path, target, pretty=False):
-    components = {
-        'script': 'LuaScript',
-        'state': 'LuaScriptState',
-        'ui': 'XmlUI',
-    }
-
     data = read_json(target.joinpath(EXTRACTED['base']))
     items = flatten_items(data['ObjectStates'])
     items.update({'GLOBAL': data})
 
-    for file in target.joinpath("scripts").iterdir():
-        name_parts = file.name.rsplit(".", maxsplit=3)
-        if len(name_parts) < 4:
-            continue
-        # name, guid, component, extension
-        name, guid, component, _ = name_parts
-        item = items.get(guid)
-        if item is None:
-            print(f"Can't find object with guid '{guid}', file '{file}' not used")
-            continue
-        if not item['Nickname'] and name != DEFAULT_NAME:
-            item['Nickname'] = name
-        if comp := components.get(component):
-            items[guid][comp] = read_text(file)
+    for directory, components in BUILD_STRUCTURE.items():
+        for file in target.joinpath(directory).iterdir():
+            name_parts = file.name.rsplit(".", maxsplit=3)
+            if len(name_parts) < 4:
+                continue
+            # name, guid, component, extension
+            name, guid, component, _ = name_parts
+            item = items.get(guid)
+            if item is None:
+                print(f"Can't find object with guid '{guid}', file '{file}' not used")
+                continue
+            if not item['Nickname'] and name != DEFAULT_NAME:
+                item['Nickname'] = name
+            if comp := components.get(component):
+                items[guid][comp] = read_text(file)
 
     del data['Nickname']
     del data['GUID']
