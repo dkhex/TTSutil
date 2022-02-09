@@ -1,8 +1,8 @@
 import json
-import os
 import argparse
 import shutil
 from pathlib import Path
+from collections import defaultdict
 
 
 DEFAULT_NAME = "unnamed"
@@ -14,31 +14,30 @@ EXTRACTED = {
     ],
 }
 EXTRACT_STRUCTURE = {
-    # key: (directory, subname, extension)
-    'LuaScript': ("scripts", "script", "lua"),
-    'LuaScriptState': ("scripts", "state", "json"),
-    'XmlUI': ("scripts", "ui", "xml"),
+    # attribute: (directory, subname, extension, type)
+    'LuaScript': ("scripts", "script", "lua", "text"),
+    'LuaScriptState': ("scripts", "state", "json", "text"),
+    'XmlUI': ("scripts", "ui", "xml", "text"),
 }
 EXTRACT_STRUCTURE_GLOBAL = {
-    **{key: ("base", key, "json")
-    for key in [
+    **EXTRACT_STRUCTURE,
+    **{attribute: ("base", attribute, "json", "json")
+    for attribute in [
         'TabStates',
         'MusicPlayer',
         'CustomUIAssets',
         'SnapPoints',
         'ObjectStates',
     ]},
-    'LuaScript': ("scripts", "script", "lua"),
-    'LuaScriptState': ("scripts", "state", "json"),
-    'XmlUI': ("scripts", "ui", "xml"),
 }
-BUILD_STRUCTURE = {
-    'scripts': {
-        'script': 'LuaScript',
-        'state': 'LuaScriptState',
-        'ui': 'XmlUI',
-    },
-}
+BUILD_STRUCTURE = defaultdict(dict)
+BUILD_STRUCTURE_GLOBAL = defaultdict(dict)
+
+for attribute, (directory, subname, extension, typ) in EXTRACT_STRUCTURE.items():
+    BUILD_STRUCTURE[directory].update({subname: (attribute, typ)})
+
+for attribute, (directory, subname, extension, typ) in EXTRACT_STRUCTURE_GLOBAL.items():
+    BUILD_STRUCTURE_GLOBAL[directory].update({subname: (attribute, typ)})
 
 
 # File-related utilities
@@ -196,10 +195,10 @@ def extract_from_items(items_dict, structure):
 
     for item in items_dict.values():
         name = item.get('Nickname', "").translate(remove_map) or DEFAULT_NAME
-        for key, (directory, comp, ext) in structure.items():
+        for key, (directory, comp, ext, typ) in structure.items():
             if value := item.get(key):
                 filename = f"{name}.{item['GUID']}.{comp}.{ext}"
-                if type(value) == str:
+                if typ == "text":
                     save_text(target.joinpath(directory, filename), value)
                 else:
                     save_json(target.joinpath(directory, filename), value, pretty=True)
@@ -207,27 +206,40 @@ def extract_from_items(items_dict, structure):
                 item[key] = type(value)()
 
 
-# Main generate function
-def build(file_path, target, pretty=False):
-    data = read_json(target.joinpath(EXTRACTED['base']))
-    items = flatten_items(data['ObjectStates'])
-    items.update({'GLOBAL': data})
+def extracted_iter(path):
+    for file_path in path.iterdir():
+        name_parts = file_path.name.rsplit(".", maxsplit=3)
+        if len(name_parts) < 4:
+            continue
+        name, guid, comp, ext = name_parts
+        yield file_path, name, guid, comp
 
-    for directory, components in BUILD_STRUCTURE.items():
-        for file in target.joinpath(directory).iterdir():
-            name_parts = file.name.rsplit(".", maxsplit=3)
-            if len(name_parts) < 4:
-                continue
-            # name, guid, component, extension
-            name, guid, component, _ = name_parts
+
+def build_from_extracted(items, structure):
+    for directory, components in structure.items():
+        for file_path, name, guid, comp in extracted_iter(target.joinpath(directory)):
             item = items.get(guid)
             if item is None:
-                print(f"Can't find object with guid '{guid}', file '{file}' not used")
                 continue
             if not item['Nickname'] and name != DEFAULT_NAME:
                 item['Nickname'] = name
-            if comp := components.get(component):
-                items[guid][comp] = read_text(file)
+            if res := components.get(comp):
+                attribute, typ = res
+                if typ == "text":
+                    value = read_text(file_path)
+                else:
+                    value = read_json(file_path)
+                item[attribute] = value
+
+
+# Main generate function
+def build(file_path, target, pretty=False):
+    data = read_json(target.joinpath(EXTRACTED['base']))
+
+    build_from_extracted({'GLOBAL': data}, BUILD_STRUCTURE_GLOBAL)
+    items = flatten_items(data['ObjectStates'])
+    items.update({'GLOBAL': data})
+    build_from_extracted(items, BUILD_STRUCTURE)
 
     del data['Nickname']
     del data['GUID']
