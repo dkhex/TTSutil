@@ -4,15 +4,30 @@ import argparse
 import shutil
 from pathlib import Path
 
+
 DEFAULT_NAME = "unnamed"
 EXTRACTED = {
     'base': "base.json",
     'dirs': [
+        "base",
         "scripts",
     ],
 }
 EXTRACT_STRUCTURE = {
-    # key : directory, subname, extension
+    # key: (directory, subname, extension)
+    'LuaScript': ("scripts", "script", "lua"),
+    'LuaScriptState': ("scripts", "state", "json"),
+    'XmlUI': ("scripts", "ui", "xml"),
+}
+EXTRACT_STRUCTURE_GLOBAL = {
+    **{key: ("base", key, "json")
+    for key in [
+        'TabStates',
+        'MusicPlayer',
+        'CustomUIAssets',
+        'SnapPoints',
+        'ObjectStates',
+    ]},
     'LuaScript': ("scripts", "script", "lua"),
     'LuaScriptState': ("scripts", "state", "json"),
     'XmlUI': ("scripts", "ui", "xml"),
@@ -35,10 +50,19 @@ def read_json(filename):
 def save_json(filename, data, pretty=False):
     if pretty:
         indent = 2
+        separators = None
     else:
         indent = None
+        separators = (",", ":")
     with open(filename, "w", encoding="utf-8") as file:
-        return json.dump(data, file, ensure_ascii=False, indent=indent)
+        return json.dump(
+            data,
+            file,
+            ensure_ascii=False,  # Allow store unicode symbols as is
+            check_circular=False,  # Disable recurtion check (doesn't need)
+            indent=indent,
+            separators=separators
+        )
 
 
 def read_text(filename):
@@ -147,29 +171,40 @@ def flatten_items(items, fix_dupes=False):
 
 
 # Main parser function
-def extract(file_path, target, pretty=False):
-    # for str.translate, removes invalid symbols from file name
-    remove_map = {ord(s): None for s in "\"\'\\|/!?*<>."}
-
+def extract(file_path, target):
     clear_dir(target)
-    scripts = target.joinpath("scripts")
-    scripts.mkdir()
+
+    for directory in EXTRACTED['dirs']:
+        path = target.joinpath(directory)
+        path.mkdir()
 
     data = read_json(file_path)
     data["Nickname"] = "global"
     data["GUID"] = "GLOBAL"
-    items = flatten_items(data['ObjectStates'], fix_dupes=True)
-    items.update({'GLOBAL': data})
 
-    for item in items.values():
+    items_dict = flatten_items(data['ObjectStates'], fix_dupes=True)
+
+    extract_from_items(items_dict, EXTRACT_STRUCTURE)
+    extract_from_items({'GLOBAL': data}, EXTRACT_STRUCTURE_GLOBAL)
+
+    save_json(target.joinpath(EXTRACTED['base']), data, pretty=True)
+
+
+def extract_from_items(items_dict, structure):
+    # for str.translate, removes invalid symbols from file name
+    remove_map = {ord(s): None for s in "\"\'\\|/!?*<>."}
+
+    for item in items_dict.values():
         name = item.get('Nickname', "").translate(remove_map) or DEFAULT_NAME
-        for key, (directory, comp, ext) in EXTRACT_STRUCTURE.items():
+        for key, (directory, comp, ext) in structure.items():
             if value := item.get(key):
                 filename = f"{name}.{item['GUID']}.{comp}.{ext}"
-                save_text(target.joinpath(directory, filename), value)
-                item[key] = ""
-
-    save_json(target.joinpath(EXTRACTED['base']), data, pretty)
+                if type(value) == str:
+                    save_text(target.joinpath(directory, filename), value)
+                else:
+                    save_json(target.joinpath(directory, filename), value, pretty=True)
+                # remove extracted data by replacing with empty value of same type
+                item[key] = type(value)()
 
 
 # Main generate function
@@ -237,7 +272,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-r", "--readable",
         action="store_true",
-        help="Make building savefile human-readable (prettify), for --extracted formats 'base.json'")
+        help="Make building savefile human-readable (increases file size)")
     args = parser.parse_args()
 
     if args.extract and args.build:
@@ -247,7 +282,7 @@ if __name__ == "__main__":
         file_path, target = get_paths(args)
         target.mkdir(parents=True, exist_ok=True)
         clear_dir(target)
-        extract(file_path, target, args.readable)
+        extract(file_path, target)
         print("Extraction complete")
     elif args.build:
         file_path, target = get_paths(args)
