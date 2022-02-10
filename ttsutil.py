@@ -3,11 +3,13 @@ import argparse
 import shutil
 from pathlib import Path
 from collections import defaultdict
+from urllib.request import urlretrieve as download
 
 
 DEFAULT_NAME = "unnamed"
 EXTRACTED = {
     'base': "base.json",
+    'cache_dir': "cache",
     'dirs': [
         "base",
         "scripts",
@@ -32,6 +34,9 @@ EXTRACT_STRUCTURE_GLOBAL = {
 }
 BUILD_STRUCTURE = defaultdict(dict)
 BUILD_STRUCTURE_GLOBAL = defaultdict(dict)
+# for str.translate, removes invalid symbols from file name
+REMOVE_SYMBOLS = {ord(s): None for s in "\"\'\\|/!?*<>:;"}
+
 
 for attribute, (directory, subname, extension, typ) in EXTRACT_STRUCTURE.items():
     BUILD_STRUCTURE[directory].update({subname: (attribute, typ)})
@@ -74,15 +79,41 @@ def save_text(filename, text):
         return file.write(text)
 
 
-def clear_dir(path):
+def clear_dir(path, clear_cache=False):
     orig_path = path.joinpath(EXTRACTED['base'])
     if orig_path.exists():
         orig_path.unlink()
-    for name in EXTRACTED['dirs']:
+    directories = MutableChain(EXTRACTED['dirs'])
+    if clear_cache:
+        directories += EXTRACTED['cache_dir']
+    for name in directories:
         dir_path = path.joinpath(name)
         if dir_path.exists() and dir_path.is_dir():
             shutil.rmtree(dir_path)
 
+
+# Working with cache and downloading items
+class Cache:
+    def __init__(self, path):
+        self.path = path
+        self.path.mkdir(parents=True, exist_ok=True)
+        self.saved = {
+            file.name: file
+            for file in self.path.iterdir()
+        }
+
+    @staticmethod
+    def strip_url(url):
+        """Same thing what TTS uses"""
+        return url.translate(REMOVE_SYMBOLS)
+
+    def get_file(self, url):
+        name = self.strip_url(url)
+        if name not in self.saved:
+            file_path = self.path.joinpath(name)
+            download(url, file_path)
+            self.saved.update({name: file_path})
+        return self.saved[name]
 
 # Some tools for work with tree-like structure and GUIDs of TTS objects
 class IDGenerator:
@@ -183,18 +214,15 @@ def extract(file_path, target):
 
     items_dict = flatten_items(data['ObjectStates'], fix_dupes=True)
 
-    extract_from_items(items_dict, EXTRACT_STRUCTURE)
-    extract_from_items({'GLOBAL': data}, EXTRACT_STRUCTURE_GLOBAL)
+    extract_from_items(target, items_dict, EXTRACT_STRUCTURE)
+    extract_from_items(target, {'GLOBAL': data}, EXTRACT_STRUCTURE_GLOBAL)
 
     save_json(target.joinpath(EXTRACTED['base']), data, pretty=True)
 
 
-def extract_from_items(items_dict, structure):
-    # for str.translate, removes invalid symbols from file name
-    remove_map = {ord(s): None for s in "\"\'\\|/!?*<>."}
-
+def extract_from_items(target, items_dict, structure):
     for item in items_dict.values():
-        name = item.get('Nickname', "").translate(remove_map) or DEFAULT_NAME
+        name = item.get('Nickname', "").translate(REMOVE_SYMBOLS) or DEFAULT_NAME
         for key, (directory, comp, ext, typ) in structure.items():
             if value := item.get(key):
                 filename = f"{name}.{item['GUID']}.{comp}.{ext}"
@@ -215,7 +243,7 @@ def extracted_iter(path):
         yield file_path, name, guid, comp
 
 
-def build_from_extracted(items, structure):
+def build_from_extracted(target, items, structure):
     for directory, components in structure.items():
         for file_path, name, guid, comp in extracted_iter(target.joinpath(directory)):
             item = items.get(guid)
@@ -236,10 +264,10 @@ def build_from_extracted(items, structure):
 def build(file_path, target, pretty=False):
     data = read_json(target.joinpath(EXTRACTED['base']))
 
-    build_from_extracted({'GLOBAL': data}, BUILD_STRUCTURE_GLOBAL)
+    build_from_extracted(target, {'GLOBAL': data}, BUILD_STRUCTURE_GLOBAL)
     items = flatten_items(data['ObjectStates'])
     items.update({'GLOBAL': data})
-    build_from_extracted(items, BUILD_STRUCTURE)
+    build_from_extracted(target, items, BUILD_STRUCTURE)
 
     del data['Nickname']
     del data['GUID']
@@ -256,7 +284,7 @@ def get_paths(args):
     return file_path, target
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(
         description="""
         Small utility for extracting scripts from Tabletop Simulator savefiles.
@@ -285,6 +313,10 @@ if __name__ == "__main__":
         "-r", "--readable",
         action="store_true",
         help="Make building savefile human-readable (increases file size)")
+    parser.add_argument(
+        "-c", "--clear-cache",
+        action="store_true",
+        help="Delete all downloaded files")
     args = parser.parse_args()
 
     if args.extract and args.build:
@@ -293,7 +325,7 @@ if __name__ == "__main__":
     elif args.extract:
         file_path, target = get_paths(args)
         target.mkdir(parents=True, exist_ok=True)
-        clear_dir(target)
+        clear_dir(target, args.clear_cache)
         extract(file_path, target)
         print("Extraction complete")
     elif args.build:
@@ -306,3 +338,7 @@ if __name__ == "__main__":
     else:
         print("Use --extract FILE or --build DIR, check --help")
         exit(1)
+
+
+if __name__ == "__main__":
+    main()
