@@ -85,7 +85,7 @@ def clear_dir(path, clear_cache=False):
         orig_path.unlink()
     directories = MutableChain(EXTRACTED['dirs'])
     if clear_cache:
-        directories += EXTRACTED['cache_dir']
+        directories += [EXTRACTED['cache_dir']]
     for name in directories:
         dir_path = path.joinpath(name)
         if dir_path.exists() and dir_path.is_dir():
@@ -318,6 +318,7 @@ def main():
         help="Make building savefile human-readable (increases file size)")
     parser.add_argument(
         "-c", "--clear-cache",
+        dest="clear_cache",
         action="store_true",
         help="Delete all downloaded files")
     args = parser.parse_args()
