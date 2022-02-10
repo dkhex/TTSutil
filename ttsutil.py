@@ -115,11 +115,10 @@ class Cache:
             self.saved.update({name: file_path})
         return self.saved[name]
 
+
 # Some tools for work with tree-like structure and GUIDs of TTS objects
 class IDGenerator:
-    """Infinite iterates all 3-byte long hex values.
-    Instance can be used as an iterator and/or as a function
-    """
+    """Returns next 3-byte long hex value"""
 
     def __init__(self, start_value=0):
         self.count = start_value
@@ -128,11 +127,6 @@ class IDGenerator:
         self.count += 1
         self.count &= 0xFFFFFF  # or 2**24-1
         return f"{self.count:06x}"
-
-    def __iter__(self):
-        return self
-
-    __next__ = __call__
 
 
 get_id = IDGenerator()
