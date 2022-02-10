@@ -293,18 +293,21 @@ def main():
     )
     parser.add_argument(
         "-e", "--extract",
+        metavar="FILE",
         type=str,
         nargs="?",
         const=False,
         help="Extract data from specified savefile")
     parser.add_argument(
         "-t", "--target",
+        metavar="DIR",
         type=str,
         nargs="?",
         const=False,
         help="Specify directory for extracted data")
     parser.add_argument(
         "-b", "--build",
+        metavar="FILE",
         type=str,
         nargs="?",
         const=False,
