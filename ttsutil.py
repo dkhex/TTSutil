@@ -15,6 +15,13 @@ EXTRACTED = {
         "scripts",
     ],
 }
+# ToDo: refactor all structures data to something more convenient
+# EXTRACT_MEDIA = {
+#     'CustomMesh': {
+#         'MeshURL': ("models", "model", "obj", "media"),
+#         'DiffuseURL': ("images", "image", "png", "media"),
+#     },
+# }
 EXTRACT_STRUCTURE = {
     # attribute: (directory, subname, extension, type)
     'LuaScript': ("scripts", "script", "lua", "text"),
@@ -107,13 +114,24 @@ class Cache:
         """Same thing what TTS uses"""
         return url.translate(REMOVE_SYMBOLS)
 
+    def download_file(self, url, path):
+        try:
+            download(url, path)
+        except:
+            print(f"Failed to download file {url}")
+            return False
+        else:
+            return True
+
     def get_file(self, url):
         name = self.strip_url(url)
-        if name not in self.saved:
-            file_path = self.path.joinpath(name)
-            download(url, file_path)
-            self.saved.update({name: file_path})
-        return self.saved[name]
+        if path := self.saved.get(name) is not None:
+            return path
+        path = self.path.joinpath(name)
+        if self.download_file(url, path):
+            self.saved[name] = path
+            return path
+
 
 # Some tools for work with tree-like structure and GUIDs of TTS objects
 class IDGenerator:
@@ -201,9 +219,7 @@ def flatten_items(items, fix_dupes=False):
 
 
 # Main parser function
-def extract(file_path, target):
-    clear_dir(target)
-
+def extract(file_path, target, dl_media=False):
     for directory in EXTRACTED['dirs']:
         path = target.joinpath(directory)
         path.mkdir()
@@ -216,6 +232,13 @@ def extract(file_path, target):
 
     extract_from_items(target, items_dict, EXTRACT_STRUCTURE)
     extract_from_items(target, {'GLOBAL': data}, EXTRACT_STRUCTURE_GLOBAL)
+    if dl_media:
+        # ToDo:
+        # cache = Cache(EXTRACTED['cache_dir'])
+        # for item in items_dict.values():
+        #     url = ...
+        #     cache.get_file(url)
+        pass
 
     save_json(target.joinpath(EXTRACTED['base']), data, pretty=True)
 
@@ -320,6 +343,11 @@ def main():
         action="store_true",
         help="Make building savefile human-readable (increases file size)")
     parser.add_argument(
+        "-d", "--download",
+        dest="download_external",
+        action="store_true",
+        help="Download external files")
+    parser.add_argument(
         "-c", "--clear-cache",
         dest="clear_cache",
         action="store_true",
@@ -327,13 +355,14 @@ def main():
     args = parser.parse_args()
 
     if args.extract and args.build:
-        print("--extract and --build can't work at the same time. Such action have no sense, y'know?")
+        print("--extract and --build can't work at the same time. "
+              "Such action have no sense, y'know?")
         exit(1)
     elif args.extract:
         file_path, target = get_paths(args)
         target.mkdir(parents=True, exist_ok=True)
         clear_dir(target, args.clear_cache)
-        extract(file_path, target)
+        extract(file_path, target, args.download_external)
         print("Extraction complete")
     elif args.build:
         file_path, target = get_paths(args)
