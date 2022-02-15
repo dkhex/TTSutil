@@ -276,11 +276,14 @@ def build(file_path, target, pretty=False):
 
 def get_paths(args):
     file_arg = args.extract or args.build
-    file_path = Path(file_arg)
+    file_path = Path(file_arg).with_suffix(".json")
+    if not file_path.is_file():
+        print(f"Can't find file {file_path}")
+        exit(1)
     if args.target:
         target = Path(args.target)
     else:
-        target = file_path.parent.joinpath(file_path.stem)
+        target = file_path.with_suffix("")
     return file_path, target
 
 
