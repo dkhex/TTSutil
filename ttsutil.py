@@ -187,8 +187,10 @@ def iterate_items(items):
     chain = MutableChain(items)
     for item in chain:
         yield item
-        if 'ContainedObjects' in item:
-            chain += item['ContainedObjects']
+        if contained := item.get('ContainedObjects'):
+            chain += contained
+        if states := item.get('States'):
+            chain += states.values()
 
 
 def fix_duplicate_iterator(items):
