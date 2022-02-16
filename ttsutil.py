@@ -296,9 +296,6 @@ def build(file_path, target, pretty=False):
 def get_paths(args):
     file_arg = args.extract or args.build
     file_path = Path(file_arg).with_suffix(".json")
-    if not file_path.is_file():
-        print(f"Can't find file {file_path}")
-        exit(1)
     if args.target:
         target = Path(args.target)
     else:
@@ -356,6 +353,9 @@ def main():
         exit(1)
     elif args.extract:
         file_path, target = get_paths(args)
+        if not file_path.is_file():
+            print(f"Can't find file {file_path}")
+            exit(1)
         target.mkdir(parents=True, exist_ok=True)
         clear_dir(target, args.clear_cache)
         extract(file_path, target, args.download_external)
@@ -363,7 +363,7 @@ def main():
     elif args.build:
         file_path, target = get_paths(args)
         if not target.joinpath(EXTRACTED['base']).exists:
-            print("Specified target is not valid extracted data")
+            print("Specified target is not a valid extracted data")
             exit(1)
         build(file_path, target, args.readable)
         print("Building complete")
