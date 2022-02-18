@@ -3,25 +3,16 @@ import argparse
 import shutil
 from pathlib import Path
 from collections import defaultdict
-from urllib.request import urlretrieve as download
 
 
 DEFAULT_NAME = "unnamed"
 EXTRACTED = {
     'base': "base.json",
-    'cache_dir': "cache",
     'dirs': [
         "base",
         "scripts",
     ],
 }
-# ToDo: refactor all structures data to something more convenient
-# EXTRACT_MEDIA = {
-#     'CustomMesh': {
-#         'MeshURL': ("models", "model", "obj", "media"),
-#         'DiffuseURL': ("images", "image", "png", "media"),
-#     },
-# }
 EXTRACT_STRUCTURE = {
     # attribute: (directory, subname, extension, type)
     'LuaScript': ("scripts", "script", "lua", "text"),
@@ -86,52 +77,15 @@ def save_text(filename, text):
         return file.write(text)
 
 
-def clear_dir(path, clear_cache=False):
+def clear_dir(path):
     orig_path = path.joinpath(EXTRACTED['base'])
     if orig_path.exists():
         orig_path.unlink()
     directories = MutableChain(EXTRACTED['dirs'])
-    if clear_cache:
-        directories += [EXTRACTED['cache_dir']]
     for name in directories:
         dir_path = path.joinpath(name)
         if dir_path.exists() and dir_path.is_dir():
             shutil.rmtree(dir_path)
-
-
-# Working with cache and downloading items
-class Cache:
-    def __init__(self, path):
-        self.path = path
-        self.path.mkdir(parents=True, exist_ok=True)
-        self.saved = {
-            file.name: file
-            for file in self.path.iterdir()
-        }
-
-    @staticmethod
-    def strip_url(url):
-        """Same thing what TTS uses"""
-        return url.translate(REMOVE_SYMBOLS)
-
-    def download_file(self, url, path):
-        try:
-            download(url, path)
-        except:
-            print(f"Failed to download file {url}")
-            return False
-        else:
-            return True
-
-    def get_file(self, url):
-        name = self.strip_url(url)
-        if path := self.saved.get(name) is not None:
-            return path
-        path = self.path.joinpath(name)
-        if self.download_file(url, path):
-            self.saved[name] = path
-            return path
-
 
 
 # Some tools for work with tree-like structure and GUIDs of TTS objects
@@ -215,7 +169,7 @@ def flatten_items(items, fix_dupes=False):
 
 
 # Main parser function
-def extract(file_path, target, dl_media=False):
+def extract(file_path, target):
     for directory in EXTRACTED['dirs']:
         path = target.joinpath(directory)
         path.mkdir()
@@ -228,13 +182,6 @@ def extract(file_path, target, dl_media=False):
 
     extract_from_items(target, items_dict, EXTRACT_STRUCTURE)
     extract_from_items(target, {'GLOBAL': data}, EXTRACT_STRUCTURE_GLOBAL)
-    if dl_media:
-        # ToDo:
-        # cache = Cache(EXTRACTED['cache_dir'])
-        # for item in items_dict.values():
-        #     url = ...
-        #     cache.get_file(url)
-        pass
 
     save_json(target.joinpath(EXTRACTED['base']), data, pretty=True)
 
@@ -335,16 +282,6 @@ def main():
         "-r", "--readable",
         action="store_true",
         help="Make building savefile human-readable (increases file size)")
-    parser.add_argument(
-        "-d", "--download",
-        dest="download_external",
-        action="store_true",
-        help="Download external files")
-    parser.add_argument(
-        "-c", "--clear-cache",
-        dest="clear_cache",
-        action="store_true",
-        help="Delete all downloaded files")
     args = parser.parse_args()
 
     if args.extract and args.build:
@@ -357,8 +294,8 @@ def main():
             print(f"Can't find file {file_path}")
             exit(1)
         target.mkdir(parents=True, exist_ok=True)
-        clear_dir(target, args.clear_cache)
-        extract(file_path, target, args.download_external)
+        clear_dir(target)
+        extract(file_path, target)
         print("Extraction complete")
     elif args.build:
         file_path, target = get_paths(args)
