@@ -1,9 +1,138 @@
 import json
 import argparse
 import shutil
+from abc import abstractmethod
 from pathlib import Path
 from collections import defaultdict
 from urllib.request import urlretrieve as download
+
+
+class Cache:
+    remove_symbols = {ord(s): None for s in "\"\'\\|/!?*<>:;"}
+    default_dir = "cache"
+
+    def __init__(self):
+        pass
+
+    def initialize(self, path):
+        self.path = path
+        self.path.mkdir(parents=True, exist_ok=True)
+        self.saved = {
+            file.name: file
+            for file in self.path.iterdir()
+        }
+
+    def strip_url(self, url):
+        return url.translate(self.remove_symbols)
+
+    def get_file(self, url):
+        name = self.strip_url(url)
+        if path := self.saved.get(name) is not None:
+            return path
+        path = self.path.joinpath(name)
+        if self.download_file(url, path):
+            self.saved[name] = path
+            return path
+
+    def download_file(self, url, path):
+        try:
+            download(url, path)
+        except:
+            print(f"Failed to download file {url}")
+            return False
+        else:
+            return True
+
+
+CACHE = Cache()
+
+
+class ExtractBase:
+    remove_symbols = {ord(s): None for s in "\"\'\\|/!?*<>:;.,"}
+    default_name = "unnamed"
+    default_extension = "txt"
+
+    def __init__(self, attribute, path, name=None, extension=None, subattribute=None):
+        self.attribute = attribute
+        self.subattribute = subattribute
+        self.path = path
+        self.name = name or self.attribute
+        self.extension = extension
+    
+    def get_path(self, obj):
+        obj_name = obj.get('Nickname').translate(self.remove_symbols) or self.default_name
+        guid = obj.get('GUID')
+        filename = f"{obj_name}.{guid}.{self.name}.{self.extension}"
+        return self.path.joinpath(filename)
+
+    def get_data(self, obj):
+        value = obj.get(self.attribute)
+        if self.subattribute is not None and value is not None:
+            return value.get(self.subattribute)
+        else:
+            return value
+
+    @abstractmethod
+    def read(self, path):
+        pass
+
+    @abstractmethod
+    def save(self, obj, data):
+        pass
+
+
+class ExtractJson(ExtractBase):
+    default_extension = "json"
+
+    def read(self, filename):
+        with open(filename, encoding="utf-8") as file:
+            return json.load(file)
+
+    def save(self, obj, data):
+        with open(self.get_path(obj), "w", encoding="utf-8", newline="\n") as file:
+            return json.dump(
+                data, file,
+                ensure_ascii=False,  # Allow store unicode symbols as is
+                check_circular=False,  # Disable recurtion check (doesn't need)
+                indent=2,  # Make json human readable
+            )
+
+
+class ExtractText(ExtractBase):
+    default_extension = "lua"
+
+    def read(self, filename):
+        with open(filename, encoding="utf-8") as file:
+            return file.read()
+
+    def save(self, filename, data):
+        with open(filename, "w", encoding="utf-8", newline="\n") as file:
+            return file.write(data)
+
+
+class ExtractFile(ExtractBase):
+    default_extension = "bin"
+    cache = CACHE
+
+    def __init__(self):
+        pass
+
+    def get_data(self, obj):
+        url = super().get_data(obj)
+        path = self.cache.get_file(url)
+        if path is not None:
+            shutil.copy(path, self.get_path(obj))
+
+    def read(self, filename):
+        pass
+
+    def save(self, filename, data):
+        pass
+
+
+class ExtractStructure:
+    def __init__(self):
+        pass
 
 
 DEFAULT_NAME = "unnamed"
@@ -15,13 +144,6 @@ EXTRACTED = {
         "scripts",
     ],
 }
-# ToDo: refactor all structures data to something more convenient
-# EXTRACT_MEDIA = {
-#     'CustomMesh': {
-#         'MeshURL': ("models", "model", "obj", "media"),
-#         'DiffuseURL': ("images", "image", "png", "media"),
-#     },
-# }
 EXTRACT_STRUCTURE = {
     # attribute: (directory, subname, extension, type)
     'LuaScript': ("scripts", "script", "lua", "text"),
@@ -97,41 +219,6 @@ def clear_dir(path, clear_cache=False):
         dir_path = path.joinpath(name)
         if dir_path.exists() and dir_path.is_dir():
             shutil.rmtree(dir_path)
-
-
-# Working with cache and downloading items
-class Cache:
-    def __init__(self, path):
-        self.path = path
-        self.path.mkdir(parents=True, exist_ok=True)
-        self.saved = {
-            file.name: file
-            for file in self.path.iterdir()
-        }
-
-    @staticmethod
-    def strip_url(url):
-        """Same thing what TTS uses"""
-        return url.translate(REMOVE_SYMBOLS)
-
-    def download_file(self, url, path):
-        try:
-            download(url, path)
-        except:
-            print(f"Failed to download file {url}")
-            return False
-        else:
-            return True
-
-    def get_file(self, url):
-        name = self.strip_url(url)
-        if path := self.saved.get(name) is not None:
-            return path
-        path = self.path.joinpath(name)
-        if self.download_file(url, path):
-            self.saved[name] = path
-            return path
-
 
 
 # Some tools for work with tree-like structure and GUIDs of TTS objects
@@ -345,14 +432,25 @@ def main():
         dest="clear_cache",
         action="store_true",
         help="Delete all downloaded files")
+    parser.add_argument(
+        "--cache-dir",
+        dest="cache_dir",
+        metavar="DIR",
+        type=str,
+        nargs="?",
+        const=False,
+        help="Specify directory for cache, may be useful if different saves use same resources")
     args = parser.parse_args()
 
     if args.extract and args.build:
         print("--extract and --build can't work at the same time. "
               "Such action have no sense, y'know?")
         exit(1)
-    elif args.extract:
-        file_path, target = get_paths(args)
+
+    file_path, target = get_paths(args)
+    CACHE.initialize(args.cache_dir or target.joinpath('cache'))
+    
+    if args.extract:
         if not file_path.is_file():
             print(f"Can't find file {file_path}")
             exit(1)
@@ -361,7 +459,6 @@ def main():
         extract(file_path, target, args.download_external)
         print("Extraction complete")
     elif args.build:
-        file_path, target = get_paths(args)
         if not target.joinpath(EXTRACTED['base']).exists:
             print("Specified target is not a valid extracted data")
             exit(1)
