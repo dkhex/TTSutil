@@ -250,21 +250,13 @@ def read_json(filename):
         return json.load(file)
 
 
-def save_json(filename, data, pretty=False):
-    if pretty:
-        indent = 2
-        separators = None
-    else:
-        indent = None
-        separators = (",", ":")
+def save_json(filename, data):
     with open(filename, "w", encoding="utf-8", newline="\n") as file:
         return json.dump(
-            data,
-            file,
+            data, file,
             ensure_ascii=False,  # Allow store unicode symbols as is
             check_circular=False,  # Disable recurtion check (doesn't need)
-            indent=indent,
-            separators=separators
+            indent=2,
         )
 
 
@@ -438,7 +430,7 @@ def build_from_extracted(target, items, structure):
 
 
 # Main generate function
-def build(file_path, target, pretty=False):
+def build(file_path, target):
     data = read_json(target.joinpath(EXTRACTED['base']))
 
     build_from_extracted(target, {'GLOBAL': data}, BUILD_STRUCTURE_GLOBAL)
@@ -448,7 +440,7 @@ def build(file_path, target, pretty=False):
 
     del data['Nickname']
     del data['GUID']
-    save_json(file_path, data, pretty)
+    save_json(file_path, data)
 
 
 def get_paths(args):
@@ -490,10 +482,6 @@ def main():
         const=False,
         help="Build a new savefile from extracted resources")
     parser.add_argument(
-        "-r", "--readable",
-        action="store_true",
-        help="Make building savefile human-readable (increases file size)")
-    parser.add_argument(
         "-d", "--download",
         dest="download_external",
         action="store_true",
@@ -533,7 +521,7 @@ def main():
         if not target.joinpath(EXTRACTED['base']).exists:
             print("Specified target is not a valid extracted data")
             exit(1)
-        build(file_path, target, args.readable)
+        build(file_path, target)
         print("Building complete")
     else:
         print("Use --extract FILE or --build DIR, check --help")

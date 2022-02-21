@@ -33,9 +33,7 @@ To build from extracted data:
 python ttsutil.py --build Saves/New_Save.json --target OtherLoc/extracted/
 ```
 
-If you want get formatted save - add `--readable` when building:
-```bash
-python ttsutil.py --readable --build Saves/TS_Save_1.json
-```
-
 If `--target` not specified, script uses directory with name of file without extension
+```bash
+python ttsutil.py --build Saves/TS_Save_1.json  # Will use Saves/TS_Save_1/ as target
+```
