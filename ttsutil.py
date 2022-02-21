@@ -310,10 +310,11 @@ get_id = IDGenerator()
 class MutableChain:
     """Special kind of chain iterator which allows adding new iterables while iterating"""
 
-    def __init__(self, *iterables):
-        self.queue = list(iterables)
-        self.current = None
-            self.next_iter()
+    def __init__(slf, *iterables):
+        slf.queue = list(iterables)
+        slf.current = []
+        if slf.queue:
+            slf.next_iter()
 
     def next_iter(self):
         if self.queue:
