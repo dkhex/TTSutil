@@ -1,6 +1,7 @@
 import json
 import argparse
 import shutil
+import hashlib
 from abc import abstractmethod
 from pathlib import Path
 from collections import defaultdict
@@ -17,21 +18,25 @@ class Cache:
     def initialize(self, path):
         self.path = path
         self.path.mkdir(parents=True, exist_ok=True)
-        self.saved = {
+        self.by_name = {
             file.name: file
             for file in self.path.iterdir()
         }
+        self.by_hash = {
+            self.get_hash(file): file
+            for file in self.path.iterdir()
+        }            
 
     def strip_url(self, url):
         return url.translate(self.remove_symbols)
 
     def get_file(self, url):
         name = self.strip_url(url)
-        if path := self.saved.get(name) is not None:
+        if path := self.by_name.get(name) is not None:
             return path
         path = self.path.joinpath(name)
         if self.download_file(url, path):
-            self.saved[name] = path
+            self.by_name[name] = path
             return path
 
     def download_file(self, url, path):
@@ -42,6 +47,14 @@ class Cache:
             return False
         else:
             return True
+
+    @staticmethod
+    def get_hash(file):
+        with open(file, "rb") as f:
+            hashsum = hashlib.md5()
+            while chunk := f.read(65536):
+                hashsum.update(chunk)
+            return hashsum.hexdigest()
 
 
 CACHE = Cache()
