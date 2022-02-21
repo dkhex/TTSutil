@@ -8,7 +8,7 @@ from urllib.request import urlretrieve as download
 
 
 class Cache:
-    remove_symbols = {ord(s): None for s in "\"\'\\|/!?*<>:;"}
+    remove_symbols = {ord(s): None for s in "\{\}\"\'\\|/!?*<>:&$@`+=-"}
     default_dir = "cache"
 
     def __init__(self):
@@ -48,49 +48,72 @@ CACHE = Cache()
 
 
 class ExtractBase:
-    remove_symbols = {ord(s): None for s in "\"\'\\|/!?*<>:;.,"}
+    remove_symbols = {ord(s): None for s in "\{\}\"\'\\|/!?*<>:&$@`+="}
     default_name = "unnamed"
     default_extension = "txt"
+    keep_extracted = False
 
-    def __init__(self, attribute, path, name=None, extension=None, subattribute=None):
+    def __init__(self, attribute, path, suffix=None, extension=None, subattribute=None):
         self.attribute = attribute
         self.subattribute = subattribute
         self.path = path
-        self.name = name or self.attribute
+        self.suffix = suffix or attribute + (f"_{subattribute}" if subattribute is not None else "")
         self.extension = extension
     
     def get_path(self, obj):
         obj_name = obj.get('Nickname').translate(self.remove_symbols) or self.default_name
         guid = obj.get('GUID')
-        filename = f"{obj_name}.{guid}.{self.name}.{self.extension}"
+        filename = f"{obj_name}.{guid}.{self.suffix}.{self.extension}"
         return self.path.joinpath(filename)
+
+    def get_pathdata(self, path):
+        parts = path.name.rsplit(".", maxsplit=3)
+        if len(parts) < 4:
+            return
+        obj_name, guid, suffix, extension = parts
+        return guid, suffix, obj_name
 
     def get_data(self, obj):
         value = obj.get(self.attribute)
-        if self.subattribute is not None and value is not None:
-            return value.get(self.subattribute)
+        if (self.subattribute is not None) and (value is not None):
+            subvalue = value.get(self.subattribute)
+            if not self.keep_extracted:
+                obj[self.attribute][self.subattribute] = type(subvalue)()
+            return subvalue
         else:
+            if not self.keep_extracted:
+                obj[self.attribute] = type(value)()
             return value
+
+    def set_data(self, obj, data):
+        if self.subattribute is not None:
+            if obj.get(self.attribute) is None:
+                obj[self.attribute] = {}
+            obj[self.attribute][self.subattribute] = data
+        else:
+            obj[self.attribute] = data
 
     @abstractmethod
     def read(self, path):
         pass
 
     @abstractmethod
-    def save(self, obj, data):
+    def save(self, obj):
         pass
 
 
 class ExtractJson(ExtractBase):
     default_extension = "json"
 
-    def read(self, filename):
-        with open(filename, encoding="utf-8") as file:
+    def read(self, path):
+        with open(path, encoding="utf-8") as file:
             return json.load(file)
 
-    def save(self, obj, data):
-        with open(self.get_path(obj), "w", encoding="utf-8", newline="\n") as file:
-            return json.dump(
+    def save(self, obj):
+        path = self.get_path(obj)
+        data = self.get_data(obj)
+        with open(path, "w", encoding="utf-8", newline="\n") as file:
+            json.dump(
                 data, file,
                 ensure_ascii=False,  # Allow store unicode symbols as is
                 check_circular=False,  # Disable recurtion check (doesn't need)
@@ -101,18 +124,21 @@ class ExtractJson(ExtractBase):
 class ExtractText(ExtractBase):
     default_extension = "lua"
 
-    def read(self, filename):
-        with open(filename, encoding="utf-8") as file:
+    def read(self, path):
+        with open(path, encoding="utf-8") as file:
             return file.read()
 
-    def save(self, filename, data):
-        with open(filename, "w", encoding="utf-8", newline="\n") as file:
-            return file.write(data)
+    def save(self, obj):
+        path = self.get_path(obj)
+        data = self.get_data(obj)
+        with open(path, "w", encoding="utf-8", newline="\n") as file:
+            file.write(data)
 
 
 class ExtractFile(ExtractBase):
     default_extension = "bin"
-    cache = CACHE
+    keep_extracted = False
+    cache = CACHE  # Should be initialized first before using 
 
     def __init__(self):
         pass
@@ -123,16 +149,60 @@ class ExtractFile(ExtractBase):
         if path is not None:
             shutil.copy(path, self.get_path(obj))
 
-    def read(self, filename):
+    def set_data(self, obj, data):
+        # ToDo: set file uri if file's hash not equal to hash in cache
         pass
 
-    def save(self, filename, data):
+    def read(self, path):
+        pass
+
+    def save(self, obj):
         pass
 
 
 class ExtractStructure:
-    def __init__(self):
-        pass
+    def __init__(self, extractors=None):
+        self.extractors = extractors or []
+        self.by_attr = defaultdict(list)
+        self.by_suffix = {}
+
+    def add_extractors(self, extractors):
+        self.extractors.extend(extractors)
+        for e in extractors:
+            self.by_attr[e.attribute].append(e)
+        self.by_suffix.update({e.suffix: e for e in extractors})
+
+    def extract(self, obj):
+        for attr in obj:
+            for extractor in self.by_attr.get(attr, []):
+                extractor.save(obj)
+
+    def build(self, obj_dict, path):
+        guid, suffix, obj_name = self.get_pathdata(path)
+        obj = obj_dict.get(guid)
+        if obj is None:
+            print(f"Can't find object {guid}, file '{path}' is not used")
+            return
+        if extractor := self.by_suffix(suffix):
+            data = extractor.read(path)
+            extractor.set_data(obj, data)
+            if obj_name != extractor.defalut_name:
+                obj['Nickname'] = obj_name
+
+
+script_extractors = [
+    ExtractText("LuaScript",      "scripts", "script", "lua"),
+    ExtractText("LuaScriptState", "scripts", "state",  "json"),
+    ExtractText("XmlUI",          "scripts", "ui",     "xml"),
+]
+object_extractor = ExtractStructure(script_extractors)
+global_extractor = ExtractStructure(script_extractors + [
+    ExtractJson("TabStates",      "base", extension="json"),
+    ExtractJson("MusicPlayer",    "base", extension="json"),
+    ExtractJson("CustomUIAssets", "base", extension="json"),
+    ExtractJson("SnapPoints",     "base", extension="json"),
+    ExtractJson("ObjectStates",   "base", extension="json"),
+])
 
 
 DEFAULT_NAME = "unnamed"
@@ -243,7 +313,7 @@ class MutableChain:
     def __init__(self, *iterables):
         self.queue = list(iterables)
         self.current = None
-        self.next_iter()
+            self.next_iter()
 
     def next_iter(self):
         if self.queue:
