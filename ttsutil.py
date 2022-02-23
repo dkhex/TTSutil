@@ -125,7 +125,7 @@ class ExtractJson(ExtractBase):
             json.dump(
                 data, file,
                 ensure_ascii=False,  # Allow store unicode symbols as is
-                check_circular=False,  # Disable recurtion check (doesn't need)
+                check_circular=False,  # Disable recursion check (doesn't need)
                 indent=2,  # Make json human readable
             )
 
