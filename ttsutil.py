@@ -13,10 +13,12 @@ class Cache:
     default_dir = "cache"
 
     def __init__(self):
-        pass
+        self.path = None
+        self.by_name = {}
+        self.by_hash = {}
 
     def initialize(self, path):
-        self.path = path
+        self.path = Path(path)
         self.path.mkdir(parents=True, exist_ok=True)
         self.by_name = {
             file.name: file
@@ -39,7 +41,8 @@ class Cache:
             self.by_name[name] = path
             return path
 
-    def download_file(self, url, path):
+    @staticmethod
+    def download_file(url, path):
         try:
             download(url, path)
         except:
@@ -78,13 +81,6 @@ class ExtractBase:
         guid = obj.get('GUID')
         filename = f"{obj_name}.{guid}.{self.suffix}.{self.extension}"
         return self.path.joinpath(filename)
-
-    def get_pathdata(self, path):
-        parts = path.name.rsplit(".", maxsplit=3)
-        if len(parts) < 4:
-            return
-        obj_name, guid, suffix, extension = parts
-        return guid, suffix, obj_name
 
     def get_data(self, obj):
         value = obj.get(self.attribute)
@@ -151,10 +147,7 @@ class ExtractText(ExtractBase):
 class ExtractFile(ExtractBase):
     default_extension = "bin"
     keep_extracted = False
-    cache = CACHE  # Should be initialized first before using 
-
-    def __init__(self):
-        pass
+    cache = CACHE  # Should be initialized first before using
 
     def get_data(self, obj):
         url = super().get_data(obj)
@@ -178,6 +171,7 @@ class ExtractStructure:
         self.extractors = extractors or []
         self.by_attr = defaultdict(list)
         self.by_suffix = {}
+        self.add_extractors(extractors)
 
     def add_extractors(self, extractors):
         self.extractors.extend(extractors)
@@ -191,19 +185,27 @@ class ExtractStructure:
                 extractor.save(obj)
 
     def build(self, obj_dict, path):
-        guid, suffix, obj_name = self.get_pathdata(path)
+        guid, suffix, obj_name = self.get_data_from_path(path)
         obj = obj_dict.get(guid)
         if obj is None:
             print(f"Can't find object {guid}, file '{path}' is not used")
             return
-        if extractor := self.by_suffix(suffix):
+        if extractor := self.by_suffix.get(suffix):
             data = extractor.read(path)
             extractor.set_data(obj, data)
             if obj_name != extractor.defalut_name:
                 obj['Nickname'] = obj_name
 
+    @staticmethod
+    def get_data_from_path(path):
+        parts = path.name.rsplit(".", maxsplit=3)
+        if len(parts) < 4:
+            return
+        obj_name, guid, suffix, extension = parts
+        return guid, suffix, obj_name
 
-script_extractors = [
+
+script_extractors: list[ExtractBase] = [  # 'Type mismatch' warning workaround
     ExtractText("LuaScript",      "scripts", "script", "lua"),
     ExtractText("LuaScriptState", "scripts", "state",  "json"),
     ExtractText("XmlUI",          "scripts", "ui",     "xml"),
@@ -268,7 +270,7 @@ def save_json(filename, data):
         return json.dump(
             data, file,
             ensure_ascii=False,  # Allow store unicode symbols as is
-            check_circular=False,  # Disable recurtion check (doesn't need)
+            check_circular=False,  # Disable recursion check (doesn't need)
             indent=2,
         )
 
@@ -317,7 +319,7 @@ class MutableChain:
 
     def __init__(self, *iterables):
         self.queue = list(iterables)
-        self.current = []
+        self.current = iter([])
         if self.queue:
             self.next_iter()
 
@@ -399,7 +401,7 @@ def extract(file_path, target, dl_media=False):
         #     cache.get_file(url)
         pass
 
-    save_json(target.joinpath(EXTRACTED['base']), data, pretty=True)
+    save_json(target.joinpath(EXTRACTED['base']), data)
 
 
 def extract_from_items(target, items_dict, structure):
@@ -411,7 +413,7 @@ def extract_from_items(target, items_dict, structure):
                 if typ == "text":
                     save_text(target.joinpath(directory, filename), value)
                 else:
-                    save_json(target.joinpath(directory, filename), value, pretty=True)
+                    save_json(target.joinpath(directory, filename), value)
                 # remove extracted data by replacing with empty value of same type
                 item[key] = type(value)()
 

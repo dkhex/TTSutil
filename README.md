@@ -14,7 +14,7 @@ Small utility to extract and put back scripts from Tabletop Simulator savefiles
 Names of extracted files is contains 4 parts separated by dot:
 `name.GUID.attrtype.extension`
 
-You can create new file or delete existing and it will be applied to object's attribute by GUID and corresponding attribute type.
+You can create new file or delete existing, and it will be applied to object's attribute by GUID and corresponding attribute type.
 
 ## Usage
 
