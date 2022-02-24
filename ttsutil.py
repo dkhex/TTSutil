@@ -74,7 +74,7 @@ class ExtractBase:
         self.subattribute = subattribute
         self.path = path
         self.suffix = suffix or attribute + (f"_{subattribute}" if subattribute is not None else "")
-        self.extension = extension
+        self.extension = extension or self.default_extension
     
     def get_path(self, obj):
         obj_name = obj.get('Nickname').translate(self.remove_symbols) or self.default_name
@@ -168,13 +168,12 @@ class ExtractFile(ExtractBase):
 
 class ExtractStructure:
     def __init__(self, extractors=None):
-        self.extractors = extractors or []
+        extractors = extractors or []
         self.by_attr = defaultdict(list)
         self.by_suffix = {}
         self.add_extractors(extractors)
 
     def add_extractors(self, extractors):
-        self.extractors.extend(extractors)
         for e in extractors:
             self.by_attr[e.attribute].append(e)
         self.by_suffix.update({e.suffix: e for e in extractors})
@@ -205,18 +204,18 @@ class ExtractStructure:
         return guid, suffix, obj_name
 
 
-script_extractors: list[ExtractBase] = [  # 'Type mismatch' warning workaround
+script_extractors: list[ExtractBase] = [  # 'Type mismatch warning workaround
     ExtractText("LuaScript",      "scripts", "script", "lua"),
     ExtractText("LuaScriptState", "scripts", "state",  "json"),
     ExtractText("XmlUI",          "scripts", "ui",     "xml"),
 ]
 object_extractor = ExtractStructure(script_extractors)
 global_extractor = ExtractStructure(script_extractors + [
-    ExtractJson("TabStates",      "base", extension="json"),
-    ExtractJson("MusicPlayer",    "base", extension="json"),
-    ExtractJson("CustomUIAssets", "base", extension="json"),
-    ExtractJson("SnapPoints",     "base", extension="json"),
-    ExtractJson("ObjectStates",   "base", extension="json"),
+    ExtractJson("TabStates",      "base"),
+    ExtractJson("MusicPlayer",    "base"),
+    ExtractJson("CustomUIAssets", "base"),
+    ExtractJson("SnapPoints",     "base"),
+    ExtractJson("ObjectStates",   "base"),
 ])
 
 
